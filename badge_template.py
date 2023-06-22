@@ -40,7 +40,7 @@ BACKLIGHT_HIGH = micropython.const(1.0)
 # low will use the darkest backlight without needing to completely hard-mask the
 # sensor in complete darkness.
 LUMINANCE_LOW = micropython.const(256)
-LUMINANCE_HIGH = micropython.const(2048)  # 65535 to use the full range.
+LUMINANCE_HIGH = micropython.const(4096)  # 65535 to use the full range.
 
 # Fursona reaction hysteresis thresholds are set much higher.
 REACT_BRIGHT_SET   = micropython.const(32768)
@@ -51,13 +51,63 @@ REACT_BRIGHT_RESET = micropython.const(16384)
 # The bottom of the Tufty2040 input range is 3.0v, so values below that likely
 # will not trigger before it cuts out.
 # Implements hysteresis thresholding using the RECOVERED voltage.
-LOW_BATTERY_VOLTAGE = micropython.const(3.1)
-RECOVERED_BATTERY_VOLTAGE = micropython.const(3.3)
+# This works in the voltage, not time, domain because adjusting the backlight
+# will radically change real time remaining.
+# 3.3v is about the inflection point of discharge for my build.
+LOW_BATTERY_VOLTAGE = micropython.const(3.3)
+RECOVERED_BATTERY_VOLTAGE = micropython.const(3.5)
 
-# Reference voltages for a full/empty battery, in volts.
-# Values for a Galleon 400mAh LiPo (I'm getting 3.8, not 3.7):
-VBAT_HIGH = micropython.const(3.8)
-VBAT_LOW = micropython.const(2.5)
+# Battery discharge curve; linearly interpolated between these points.
+# Tuples of (voltage, seconds remaining), must be in-order!
+# These are measurements from my build, at BACKLIGHT_HIGH (100%) brightness.
+BATTERY_CURVE = [
+    (4.093287, 14964),
+    (4.064212, 14904),
+    (3.465589,  2945),
+    (3.381090,  1322),
+    (3.307933,   902),
+    (2.760295,     0),
+]
+# These are now derived from the curve.
+BATTERY_SECONDS_MAXIMUM = BATTERY_CURVE[0][1]
+VBAT_HIGH = BATTERY_CURVE[0][0]
+VBAT_LOW = BATTERY_CURVE[-1][0]
+# From measurements at BACKLIGHT_LOW, and derive the extra time that's worth.
+BATTERY_SECONDS_MAXIMUM_LOWBRIGHT = 50423
+BATTERY_LOWBRIGHT_MULITIPLIER = BATTERY_SECONDS_MAXIMUM_LOWBRIGHT / BATTERY_SECONDS_MAXIMUM
+
+def battery_seconds_remaining(voltage: float) -> int:
+    higher = -1
+    for (i, (v, s)) in enumerate(BATTERY_CURVE):
+        if v < voltage:
+            break  # We've overshot the point down the curve we're at; stop.
+        higher = i
+    # Voltage higher than expected curve
+    if higher == -1:
+        return BATTERY_SECONDS_MAXIMUM
+    # Voltage lower than expected curve
+    if higher == len(BATTERY_CURVE) - 1:
+        return 0
+    i = higher
+    # Voltage is somewhere between BATTERY_CURVE[i] and BATTERY_CURVE[i+1]
+    (v_high, v_low) = (BATTERY_CURVE[i][0], BATTERY_CURVE[i+1][0])
+    (s_high, s_low) = (BATTERY_CURVE[i][1], BATTERY_CURVE[i+1][1])
+    v_span = v_high - v_low
+    s_span = s_high - s_low
+    normalized = 1.0 - ((v_high - voltage) / v_span)
+    return s_low + (normalized * s_span)
+
+def brightness_adjust_battery_seconds(seconds: int, brightness: float) -> int:
+    # How far is the brightness toward BACKLIGHT_LOW?
+    frac = (brightness - BACKLIGHT_LOW) / (BACKLIGHT_HIGH - BACKLIGHT_LOW)
+    frac = 1.0 - frac
+    # Assume linear effect on power draw from backlight brightness.
+    return int(seconds * (1 + (frac * (BATTERY_LOWBRIGHT_MULITIPLIER - 1))))
+
+# Derive the threshold in which the seconds-based battery bar graph's "low"
+# threshold should be from the voltage-based brightness low threshold.
+LOW_BATTERY_SECONDS = battery_seconds_remaining(LOW_BATTERY_VOLTAGE)
+LOW_BATTERY_FRAC = float(LOW_BATTERY_SECONDS) / BATTERY_SECONDS_MAXIMUM
 
 display = PicoGraphics(display=DISPLAY_TUFTY_2040, pen_type=PEN_P8)
 display.set_backlight(0.0)  # Until we've had a chance to repaint
@@ -153,16 +203,16 @@ def draw_3d_rect(x, y, w, h, highlight, fill, shadow):
     display.rectangle(x+2, y+2, w-4, h-4)
 
 
-def draw_text_centered(text, x, y, wordwrap, scale=2.0, spacing=1):
-    w = display.measure_text(text, scale, spacing)
+def draw_text_centered(text, x, y, wordwrap, scale=2.0, spacing=1, fixed_width=False):
+    w = display.measure_text(text, scale, spacing, fixed_width=fixed_width)
     display.text(text, int(x + ((wordwrap - w) / 2)), y, wordwrap,
-                 scale=scale, spacing=spacing)
+                 scale=scale, spacing=spacing, fixed_width=fixed_width)
 
 
-def draw_text_right(text, x, y, wordwrap, scale=2.0, spacing=1):
-    w = display.measure_text(text, scale, spacing)
+def draw_text_right(text, x, y, wordwrap, scale=2.0, spacing=1, fixed_width=False):
+    w = display.measure_text(text, scale, spacing, fixed_width=fixed_width)
     display.text(text, x + (wordwrap - w), y, wordwrap,
-                 scale=scale, spacing=spacing)
+                 scale=scale, spacing=spacing, fixed_width=fixed_width)
 
 
 # This is useful for badge modes that don't want to do anything on tick.
@@ -352,9 +402,9 @@ def bmode_status_tick():
     # Battery gauge debugging for while attached to Thonny.
     if False:
         stats["usb"] = False
-        stats['vbat_low'] = 3.0
+        stats['vbat_low'] = VBAT_LOW
         stats['vbat'] -= 0.01
-        stats['vbat_high'] = 3.8
+        stats['vbat_high'] = VBAT_HIGH
         if stats['vbat'] < VBAT_LOW:
             stats['vbat'] = VBAT_HIGH
 
@@ -364,33 +414,46 @@ def bmode_status_tick():
                            int(GAUGE_VBAT_Y + ((GAUGE_H - (8*SCALE)) / 2)),
                            256, SCALE)
     else:
-        BAT_THRESH = (LOW_BATTERY_VOLTAGE - VBAT_LOW) / (VBAT_HIGH - VBAT_LOW)
-        bat_frac = (stats['vbat'] - VBAT_LOW) / (VBAT_HIGH - VBAT_LOW)
+        bat_s = battery_seconds_remaining(stats['vbat'])
+        bat_frac = float(bat_s) / BATTERY_SECONDS_MAXIMUM
         bat_frac = min(1.0, max(0.0, bat_frac))
-        # Overdraw hides the right border of the red segment
+        # Overdraw hides the right border of the red segment.
         w = int(bat_frac * 256)  # int(min(BAT_THRESH, bat_frac) * 256)
         draw_3d_rect(GAUGE_X, GAUGE_VBAT_Y, w, GAUGE_H,
                      WPAL_YELLOW, WPAL_RED, WPAL_DRED)
-        if bat_frac > BAT_THRESH:
-            w = int(bat_frac * 256) - int(BAT_THRESH * 256)
-            draw_3d_rect(GAUGE_X + int(BAT_THRESH * 256), GAUGE_VBAT_Y, w, GAUGE_H,
+        if bat_frac > LOW_BATTERY_FRAC:
+            w = int(bat_frac * 256) - int(LOW_BATTERY_FRAC * 256)
+            draw_3d_rect(GAUGE_X + int(LOW_BATTERY_FRAC * 256), GAUGE_VBAT_Y, w, GAUGE_H,
                          WPAL_GREEN, WPAL_DGREEN, WPAL_DGREY)
             # Patch the left edge of the green segment
             display.set_pen(WPAL_DGREEN)
-            display.rectangle(GAUGE_X + int(BAT_THRESH * 256), GAUGE_VBAT_Y + 2,
+            display.rectangle(GAUGE_X + int(LOW_BATTERY_FRAC * 256), GAUGE_VBAT_Y + 2,
                               min(2, w), GAUGE_H - 4)
         display.set_pen(WPAL_WHITE)
-        draw_text_centered(f"{bat_frac * 100.0:.2f}%",
+        # Repurpose bat_[smh] for the brightness-adjusted time estimate.
+        # The bar ignores brightness since it's a "time domain" voltage readout,
+        # wanting the linearization but not the actual estimation.
+        bat_s = brightness_adjust_battery_seconds(bat_s, stats['backlight'])
+        bat_m = bat_s // 60
+        bat_s %= 60
+        bat_h = bat_m // 60
+        bat_m %= 60
+        bat_time = f"{bat_s:02d}s"
+        if bat_m > 0:
+            bat_time = f"{bat_m:02d}m{bat_time}"
+        if bat_h > 0:
+            bat_time = f"{bat_h}h{bat_time}"
+        draw_text_centered(f"{bat_frac * 100.0:.2f}% {bat_time}",
                            GAUGE_X,
                            int(GAUGE_VBAT_Y + ((GAUGE_H - (8*SCALE)) / 2)),
-                           256, SCALE)
+                           256, SCALE, fixed_width=True)
         y = GAUGE_VBAT_Y + GAUGE_H - (2 + 8*2)
         display.text(f"{stats['vbat_low']:.2f}v",
-                     GAUGE_X + 2, y, 252, SCALE)
+                     GAUGE_X + 2, y, 252, SCALE, fixed_width=True)
         draw_text_centered(f"{stats['vbat']:.2f}v",
-                           GAUGE_X + 2, y, 252, SCALE)
+                           GAUGE_X + 2, y, 252, SCALE, fixed_width=True)
         draw_text_right(f"{stats['vbat_high']:.2f}v",
-                        GAUGE_X + 2, y, 252, SCALE)
+                        GAUGE_X + 2, y, 252, SCALE, fixed_width=True)
 
     w = int(stats['lum'] / (8192 / 256))  # Reduced range from 65536
     w = min(w, 256)
@@ -400,12 +463,12 @@ def bmode_status_tick():
     draw_text_centered(f"{stats['lum'] / 655.36:.2f}%",
                        GAUGE_X,
                        int(GAUGE_LUX_Y + ((GAUGE_H - (8*SCALE)) / 2)),
-                       256, SCALE)
+                       256, SCALE, fixed_width=True)
     y = GAUGE_LUX_Y + GAUGE_H - (2 + 8*2)
     display.text(f"{stats['lum_low'] / 655.36:.2f}%",
-                 GAUGE_X + 2, y, 252, SCALE)
+                 GAUGE_X + 2, y, 252, SCALE, fixed_width=True)
     draw_text_right(f"{stats['lum_high'] / 655.36:.2f}%",
-                    GAUGE_X + 2, y, 252, SCALE)
+                    GAUGE_X + 2, y, 252, SCALE, fixed_width=True)
 
     w = int(stats['backlight'] * 256)
     draw_3d_rect(GAUGE_X, GAUGE_BACKLIGHT_Y, w, GAUGE_H,
@@ -413,7 +476,7 @@ def bmode_status_tick():
     display.set_pen(WPAL_YELLOW)
     draw_text_centered(f"{int(stats['backlight'] * 100)}%", GAUGE_X,
                        int(GAUGE_BACKLIGHT_Y + ((GAUGE_H - (8*SCALE)) / 2)),
-                       256, SCALE)
+                       256, SCALE, fixed_width=True)
 
     display.update()
 
