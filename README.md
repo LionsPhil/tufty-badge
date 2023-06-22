@@ -2,6 +2,8 @@
 
 See https://www.lionsphil.co.uk/projects/tufty/ !
 
+**Requires pimoroni-pico firmware at least v1.20.3.**
+
 ## Battery logging
 
 `batterylog.py` saves to the internal flash a trace of the battery voltage, and the two `.tsv` files are those logs for the Tufty 2040 with Galleon (per my build) at 100 and 38 brightness.
