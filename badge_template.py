@@ -492,7 +492,6 @@ def auto_brightness():
     # Use the stats to gently smear the backlight to reduce flickering.
     backlight_diff = backlight - stats["backlight"]
     backlight = stats["backlight"] + (backlight_diff * (1.0 / 32.0))
-    display.set_backlight(backlight)
 
     stats["lum"] = luminance
     stats["lum_low"] = min(stats["lum_low"], luminance)
@@ -568,12 +567,11 @@ random.seed()  # Tufty firmware apparently defines a default RNG source.
 while True:
     # Turn on VREF and LUX only while we measure things.
     lux_vref_pwr.value(1)
+    auto_brightness()
     measure_battery()
     if stats["low_battery"]:
-        display.set_backlight(BACKLIGHT_LOW)
         stats["backlight"] = BACKLIGHT_LOW
-    else:
-        auto_brightness()
+    display.set_backlight(stats["backlight"])
     lux_vref_pwr.value(0)
 
     if button_a.is_pressed or button_b.is_pressed or button_c.is_pressed:
