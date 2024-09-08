@@ -1,8 +1,23 @@
 # Public Tufty 2040 badge scripts.
 
-See https://www.lionsphil.co.uk/projects/tufty/ !
+**See https://www.lionsphil.co.uk/projects/tufty/ !**
 
-**Requires pimoroni-pico firmware at least v1.20.3.**
+Requires pimoroni-pico firmware at least v1.20.3.
+See [the project page](https://www.lionsphil.co.uk/projects/tufty/#software) for how to update it.
+Make sure you update `main.py` too, or the badge may fail to start due to low memory.
+
+## Badge template
+
+Mostly, read the project page to install, and read the comments to customize.
+You will need to use [`convertimg.py`](https://github.com/LionsPhil/tufty-badge/blob/main/convertimg.py) to prepare your artwork, and Thonny to copy it (and the script) over.
+
+It doesn't use PNG (yet, anyway) because, aside from being written before that library was added, the PNG decoder uses more memory and that is quite tight.
+I was also having some palette issues, and even if those were solved, [a FR is needed for the color cycling](https://github.com/pimoroni/pimoroni-pico/issues/994).
+
+By default, the badge cycles through the three screens on any of the A/B/C buttons.
+Holding the up/down arrows while on the status screen will adjust a brightness cap.
+
+As a debug feature, holding an arrow then holding C (in this order, if you want to avoid cycling screen) will fake a reading; C+up is fake maximum brightness, C+down is fake low battery.
 
 ## Battery logging
 

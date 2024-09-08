@@ -135,6 +135,7 @@ stats = {
     "lum_low": 65535,
     "lum_high": 0,
     "backlight": 0.0,  # Also used to smooth changes (so will fade in)
+    "backlight_cap": BACKLIGHT_HIGH,
 }
 
 
@@ -394,6 +395,16 @@ def bmode_status_tick():
     GAUGE_H           = micropython.const(64)
     SCALE = micropython.const(2)
 
+    # Allow setting a maximum brightness clamp using the arrows.
+    if button_up.is_pressed and not button_c.is_pressed:
+        stats["backlight_cap"] += 0.01
+        if stats["backlight_cap"] > BACKLIGHT_HIGH:
+            stats["backlight_cap"] = BACKLIGHT_HIGH
+    if button_down.is_pressed and not button_c.is_pressed:
+        stats["backlight_cap"] -= 0.01
+        if stats["backlight_cap"] < BACKLIGHT_LOW:
+            stats["backlight_cap"] = BACKLIGHT_LOW
+
     display.set_pen(WPAL_BLACK)
     display.rectangle(GAUGE_X, GAUGE_VBAT_Y, GAUGE_W, GAUGE_H)
     display.rectangle(GAUGE_X, GAUGE_LUX_Y, GAUGE_W, GAUGE_H)
@@ -477,13 +488,27 @@ def bmode_status_tick():
     draw_text_centered(f"{int(stats['backlight'] * 100)}%", GAUGE_X,
                        int(GAUGE_BACKLIGHT_Y + ((GAUGE_H - (8*SCALE)) / 2)),
                        256, SCALE, fixed_width=True)
+    # Draw the cap, if set.
+    if stats["backlight_cap"] < BACKLIGHT_HIGH:
+        w = int(stats["backlight_cap"] * 256)
+        # Rather than a filled rectangle, draw a crossed-out box.
+        (x1, y1, x2, y2) = (GAUGE_X + w, GAUGE_BACKLIGHT_Y, 256 - w, GAUGE_H)
+        x2 += x1 - 1
+        y2 += y1 - 1
+        display.set_pen(WPAL_RED)
+        display.line(x1, y1, x2, y1)
+        display.line(x1, y2, x2, y2)
+        display.line(x1, y1, x1, y2)
+        display.line(x2, y1, x2, y2)
+        display.line(x1, y1, x2, y2)
+        display.line(x2, y1, x1, y2)
 
     display.update()
 
 
 def auto_brightness():
     luminance = lux.read_u16()
-    if button_up.is_pressed:
+    if button_c.is_pressed and button_up.is_pressed:
         # Debug key
         luminance = 65535
     luminance_frac = max(0.0, float(luminance - LUMINANCE_LOW))
@@ -492,6 +517,9 @@ def auto_brightness():
     # Use the stats to gently smear the backlight to reduce flickering.
     backlight_diff = backlight - stats["backlight"]
     backlight = stats["backlight"] + (backlight_diff * (1.0 / 32.0))
+    # But, ultimately, hard-cap it if set.
+    if backlight > stats["backlight_cap"]:
+        backlight = stats["backlight_cap"]
 
     stats["lum"] = luminance
     stats["lum_low"] = min(stats["lum_low"], luminance)
@@ -500,7 +528,7 @@ def auto_brightness():
 
 
 def measure_battery():
-    if button_down.is_pressed:
+    if button_c.is_pressed and button_down.is_pressed:
         # Debug key
         stats["vbat"] = 3.0
         stats["usb"] = False
@@ -574,7 +602,10 @@ while True:
     display.set_backlight(stats["backlight"])
     lux_vref_pwr.value(0)
 
-    if button_a.is_pressed or button_b.is_pressed or button_c.is_pressed:
+    if button_up.is_pressed or button_down.is_pressed:
+        # Don't modeswitch if doing the debug key combo.
+        pass
+    elif button_a.is_pressed or button_b.is_pressed or button_c.is_pressed:
         current_mode += 1
         if current_mode >= len(badge_modes):
             current_mode = 0
