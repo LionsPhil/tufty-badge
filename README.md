@@ -11,7 +11,8 @@ Make sure you update `main.py` too, or the badge may fail to start due to low me
 Mostly, read the project page to install, and read the comments to customize.
 You will need to use [`convertimg.py`](https://github.com/LionsPhil/tufty-badge/blob/main/convertimg.py) to prepare your artwork, and Thonny to copy it (and the script) over.
 
-It doesn't use PNG (yet, anyway) because, aside from being written before that library was added, the PNG decoder uses more memory and that is quite tight.
+Alternatively, you can change the `draw_pri_image` calls to [draw PNGs](https://github.com/pimoroni/pimoroni-pico/blob/main/micropython/modules/picographics/README.md#png-files).
+I don't use PNG (yet, anyway) because, aside from this being written before that library was added, the PNG decoder uses more memory and that is quite tight.
 I was also having some palette issues, and even if those were solved, [a FR is needed for the color cycling](https://github.com/pimoroni/pimoroni-pico/issues/994).
 
 By default, the badge cycles through the three screens on any of the A/B/C buttons.
