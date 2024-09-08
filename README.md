@@ -20,6 +20,15 @@ Holding the up/down arrows while on the status screen will adjust a brightness c
 
 As a debug feature, holding an arrow then holding C (in this order, if you want to avoid cycling screen) will fake a reading; C+up is fake maximum brightness, C+down is fake low battery.
 
+## Convertimg
+
+Converts other images to PRI, for the badge.
+Run this on a full computer with a Python environment (like a normal Linux Pi), with a single PNG as an argument, and it will write the matching PRI file.
+You don't need any of the command-line flags.
+Use Thonny to copy the PRI file onto the Tufty.
+
+(If you've seen my other projects, note that this is an earlier version of PRI than the [PRI2 format](https://github.com/LionsPhil/inkyframe/blob/main/paperthin-server/picorle.py) supported by PaperThin; they're not interchangable.)
+
 ## Battery logging
 
 `batterylog.py` saves to the internal flash a trace of the battery voltage, and the two `.tsv` files are those logs for the Tufty 2040 with Galleon (per my build) at 100 and 38 brightness.
